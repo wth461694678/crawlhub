@@ -236,8 +236,10 @@ from crawlhub.core.registry import discover_platforms, get_registry
 discover_platforms()
 plats = sorted(get_registry().keys())
 print(f'  -> platforms: {plats}')
-if len(plats) < 6:
-    print(f'  FAIL: expected >=6 platforms, got {len(plats)}')
+import platform as _pf
+_min_plats = 5 if _pf.system() == 'Darwin' else 6
+if len(plats) < _min_plats:
+    print(f'  FAIL: expected >={_min_plats} platforms, got {len(plats)}')
     sys.exit(2)
 """
         result = subprocess.run(

@@ -40,6 +40,9 @@ python-dateutil>=2.8.2
 # --- MCP Server (crawlhub_command tool) ---
 mcp[cli]>=1.0.0
 
+# --- TLS Fingerprint (Kuaishou anti-detection) ---
+curl_cffi>=0.7.0
+
 # --- Cryptography (Kuaishou protocol encryption) ---
 gmssl>=3.2
 pycryptodome>=3.19

@@ -1,0 +1,378 @@
+# plugin.yaml — Kuaishou platform plugin manifest
+#
+# Entry point: crawlhub.crawlers.kuaishou.service:KuaishouService
+
+name: kuaishou
+display_name: "快手"
+version: "1.0.0"
+description: "Scrapes Kuaishou videos, comments, and video details."
+entry: crawlhub.crawlers.kuaishou.service:KuaishouService
+
+cookie:
+  required: true
+  description: "Kuaishou cookie.json (from cookies/get-cookies-for-kuaishou.py)"
+
+# R7 Observability — 声明本插件用了 websockets（live_protocol.py），让 plugin loader 校验 patch 覆盖
+transport_libraries:
+  - websockets   # live_protocol.py 用
+
+actions:
+  search_videos:
+    display_name: "搜索视频"
+    description: "搜索快手视频（按关键词），返回 photo_id、文案、作者、点赞/播放数等"
+    output_dataclass: "crawlhub.crawlers.kuaishou.crawler.models:SearchResult"
+    input_schema:
+      type: object
+      properties:
+        keyword:
+          type: string
+          title: "搜索关键词"
+          description: "搜索关键词"
+        max_results:
+          type: integer
+          title: "最大结果数"
+          description: "最大获取视频条数"
+          default: 20
+      required: ["keyword"]
+    output_schema:
+      photo_id:
+        type: VARCHAR
+        label: "视频 ID"
+      name:
+        type: VARCHAR
+        label: "视频标题"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      view_count:
+        type: BIGINT
+        label: "播放数"
+      author_id:
+        type: VARCHAR
+        label: "作者 UID"
+      author_name:
+        type: VARCHAR
+        label: "作者昵称"
+      keyword:
+        type: VARCHAR
+        label: "搜索关键词"
+        description: "回填触发该结果的搜索词"
+
+  get_video_detail:
+    display_name: "视频详情"
+    description: "获取快手视频详情（标题、作者、点赞/播放/评论数、时长、标签）"
+    output_dataclass: "crawlhub.crawlers.kuaishou.crawler.models:VideoInfo"
+    input_schema:
+      type: object
+      properties:
+        video_id:
+          type: string
+          title: "视频标识"
+          description: "视频标识：photo_id 或视频URL"
+      required: ["video_id"]
+    output_schema:
+      photo_id:
+        type: VARCHAR
+        label: "视频 ID"
+      name:
+        type: VARCHAR
+        label: "视频标题"
+      duration:
+        type: INTEGER
+        label: "时长"
+        description: "时长（毫秒）"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      view_count:
+        type: BIGINT
+        label: "播放数"
+      comment_count:
+        type: BIGINT
+        label: "评论数"
+      author_id:
+        type: VARCHAR
+        label: "作者 UID"
+      author_name:
+        type: VARCHAR
+        label: "作者昵称"
+      tags:
+        type: JSON
+        label: "标签列表"
+        description: "数组，元素为标签字符串"
+      fetched_at:
+        type: VARCHAR
+        label: "抓取时间"
+        description: "本条记录的抓取时刻 ISO8601"
+
+  scrape_comments:
+    display_name: "爬取评论"
+    description: "爬取单个快手视频评论（含楼中楼可选），多视频请改用批处理任务"
+    output_dataclass: "crawlhub.crawlers.kuaishou.crawler.models:Comment"
+    input_schema:
+      type: object
+      properties:
+        video_id:
+          type: string
+          title: "视频标识"
+          description: "视频标识：photo_id 或 URL（仅单值；多视频请用批处理）"
+        max_comments:
+          type: integer
+          title: "最大评论数"
+          description: "单视频最大评论数"
+        include_sub_comments:
+          type: boolean
+          title: "抓取楼中楼"
+          description: "是否抓取楼中楼回复，开启后耗时显著增加"
+          default: false
+      required: ["video_id", "max_comments"]
+    output_schema:
+      comment_id:
+        type: VARCHAR
+        label: "评论 ID"
+      author_id:
+        type: VARCHAR
+        label: "评论者 UID"
+      author_name:
+        type: VARCHAR
+        label: "评论者昵称"
+      content:
+        type: VARCHAR
+        label: "评论内容"
+      timestamp:
+        type: BIGINT
+        label: "发布时间戳"
+        description: "Unix 时间戳（毫秒）"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      has_sub_comments:
+        type: BOOLEAN
+        label: "是否有楼中楼"
+      photo_id:
+        type: VARCHAR
+        label: "所属视频 ID"
+      reply_to_user_name:
+        type: VARCHAR
+        label: "被回复用户昵称"
+      reply_to:
+        type: VARCHAR
+        label: "被回复评论 ID"
+      is_sub_comment:
+        type: BOOLEAN
+        label: "是否楼中楼"
+      parent_comment_id:
+        type: VARCHAR
+        label: "父评论 ID"
+      _source_video:
+        type: VARCHAR
+        label: "来源视频"
+        description: "批处理时记录该条评论的来源视频"
+
+  list_live_categories:
+    display_name: "全部直播分类"
+    description: "翻页采集快手 /live_api/category/data 全部直播分类（含每分类的 top 直播间数量）。Hybrid：浏览器借桥拿一次签名（kww + cookie），Python httpx 翻页重放。"
+    output_dataclass: "crawlhub.crawlers.kuaishou.crawler.models:LiveCategoryItem"
+    runtime: browser_backed
+    transport: http
+    throttle_scope: request
+    browser:
+      session_scope: platform_cookie
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      category_id: {type: VARCHAR, label: "分类 ID"}
+      category_name: {type: VARCHAR, label: "分类名"}
+      icon_url: {type: VARCHAR, label: "分类图标"}
+      category_type: {type: BIGINT, label: "分类类型"}
+      top_rooms_count: {type: BIGINT, label: "首屏直播间数"}
+
+  search_live_categories:
+    display_name: "搜索直播分类"
+    description: "按关键词搜索直播分类（/live_api/category/search?keyword=...）。Hybrid：浏览器借桥拿签名，Python 单次重放。注意：返回的是分类，不是直播间。"
+    output_dataclass: "crawlhub.crawlers.kuaishou.crawler.models:LiveCategorySearchResult"
+    runtime: browser_backed
+    transport: http
+    throttle_scope: request
+    browser:
+      session_scope: platform_cookie
+    input_schema:
+      type: object
+      properties:
+        keyword:
+          type: string
+          title: "搜索关键词"
+          description: "要搜索的直播分类关键词"
+      required: ["keyword"]
+    output_schema:
+      category_id: {type: VARCHAR, label: "分类 ID"}
+      category_name: {type: VARCHAR, label: "分类名"}
+      icon_url: {type: VARCHAR, label: "分类图标"}
+      category_type: {type: BIGINT, label: "分类类型"}
+      keyword: {type: VARCHAR, label: "搜索关键词"}
+
+  list_category_live_rooms:
+    display_name: "分区直播间列表"
+    description: "采集指定分类下的全部直播间（/live_api/gameboard/list?gameId=...）。Hybrid：浏览器借桥拿 kww header + __NS_hxfalcon query 双重签名，Python 翻页重放。"
+    output_dataclass: "crawlhub.crawlers.kuaishou.crawler.models:LiveRoomSearchResult"
+    runtime: browser_backed
+    transport: http
+    throttle_scope: request
+    browser:
+      session_scope: platform_cookie
+    input_schema:
+      type: object
+      properties:
+        category_id:
+          type: string
+          title: "分类 ID"
+          description: "也叫 gameId；可从 list_live_categories 或 search_live_categories 拿到"
+        max_results:
+          type: integer
+          title: "最大直播间数"
+          default: 100
+        page_size:
+          type: integer
+          title: "单页大小"
+          description: "默认 20，与浏览器抓包一致；改大可能触发风控"
+          default: 20
+      required: ["category_id"]
+    output_schema:
+      live_stream_id: {type: VARCHAR, label: "直播流 ID"}
+      principal_id: {type: VARCHAR, label: "主播 ID"}
+      author_name: {type: VARCHAR, label: "主播昵称"}
+      author_avatar: {type: VARCHAR, label: "主播头像"}
+      title: {type: VARCHAR, label: "直播标题"}
+      cover_url: {type: VARCHAR, label: "封面图"}
+      watching_count: {type: BIGINT, label: "观看人数"}
+      like_count: {type: BIGINT, label: "点赞数"}
+      category_id: {type: VARCHAR, label: "分类 ID"}
+      category_name: {type: VARCHAR, label: "分类名"}
+      stream_flv: {type: VARCHAR, label: "FLV 流地址"}
+      start_time: {type: BIGINT, label: "开播时间戳"}
+
+  get_live_room_info:
+    display_name: "直播间详情"
+    description: "采集快手直播间首屏快照（标题、主播、是否直播中等）。"
+    output_dataclass: "crawlhub.crawlers.kuaishou.crawler.models:LiveRoomInfoRecord"
+    runtime: browser_backed
+    transport: http
+    throttle_scope: request
+    browser:
+      session_scope: platform_cookie
+    input_schema:
+      type: object
+      properties:
+        principal_id:
+          type: string
+          title: "principal_id 或 URL"
+          description: "主播 id（live.kuaishou.com/u/<id>）或完整直播间 URL"
+      required: ["principal_id"]
+    output_schema:
+      principal_id: {type: VARCHAR, label: "principal_id"}
+      live_stream_id: {type: VARCHAR, label: "直播流 ID"}
+      title: {type: VARCHAR, label: "直播标题"}
+      author_id: {type: VARCHAR, label: "主播 UID"}
+      author_name: {type: VARCHAR, label: "主播昵称"}
+      is_live: {type: BOOLEAN, label: "是否直播中"}
+      fetched_at: {type: VARCHAR, label: "抓取时间"}
+      source_url: {type: VARCHAR, label: "来源页面 URL"}
+
+  collect_live_events:
+    display_name: "采集直播事件"
+    description: "采集快手直播 WebSocket 事件流（弹幕、礼物、点赞、系统通知、在线列表）。Hybrid：浏览器扛身份证明，Python 接管 WS。直播结束（SC_ERROR code=60200）会自动停止。"
+    output_dataclass: "crawlhub.crawlers.kuaishou.crawler.models:LiveEventRecord"
+    runtime: browser_backed
+    transport: websocket
+    throttle_scope: none
+    browser:
+      session_scope: platform_cookie
+    input_schema:
+      type: object
+      properties:
+        principal_id:
+          type: string
+          title: "principal_id 或直播间 URL"
+        duration_seconds:
+          type: integer
+          title: "采集时长（秒）"
+          description: "留空=持续爬取直到下播或手动取消"
+        event_filter:
+          type: array
+          title: "关注的事件类型"
+          description: "勾选感兴趣的直播事件，未勾选的事件不会保存。留空 = 全部保留"
+          items:
+            type: string
+            enum:
+              - "SC_FEED_PUSH_COMMENT"
+              - "SC_FEED_PUSH_GIFT"
+              - "SC_FEED_PUSH_LIKE"
+              - "SC_FEED_PUSH_SYSTEM_NOTICE"
+              - "SC_LIVE_WATCHING_LIST"
+              - "SC_RED_PACK_FEED"
+              - "SC_GUESS_OPENED"
+              - "SC_GUESS_CLOSED"
+              - "SC_BET_CHANGED"
+              - "SC_BET_CLOSED"
+              - "SC_RIDE_CHANGED"
+              - "SC_COMMENT_ZONE_RICH_TEXT"
+              - "SC_INTERACTIVE_CHAT_CLOSED"
+              - "SC_LIVE_WARNING_MASK_STATUS_CHANGED"
+              - "SC_LIVE_END"
+              - "SC_ERROR"
+            enum_labels:
+              - "弹幕（SC_FEED_PUSH_COMMENT）"
+              - "礼物（SC_FEED_PUSH_GIFT）"
+              - "点赞（SC_FEED_PUSH_LIKE）"
+              - "系统通知（SC_FEED_PUSH_SYSTEM_NOTICE）"
+              - "在线观众列表（SC_LIVE_WATCHING_LIST）"
+              - "红包（SC_RED_PACK_FEED）"
+              - "竞猜开始（SC_GUESS_OPENED）"
+              - "竞猜结束（SC_GUESS_CLOSED）"
+              - "投注变化（SC_BET_CHANGED）"
+              - "投注结束（SC_BET_CLOSED）"
+              - "座驾变化（SC_RIDE_CHANGED）"
+              - "评论区富文本（SC_COMMENT_ZONE_RICH_TEXT）"
+              - "互动聊天关闭（SC_INTERACTIVE_CHAT_CLOSED）"
+              - "直播警告（SC_LIVE_WARNING_MASK_STATUS_CHANGED）"
+              - "下播信号（SC_LIVE_END）"
+              - "其他错误（SC_ERROR）"
+          default:
+            - "SC_FEED_PUSH_COMMENT"
+            - "SC_FEED_PUSH_GIFT"
+            - "SC_FEED_PUSH_LIKE"
+            - "SC_FEED_PUSH_SYSTEM_NOTICE"
+            - "SC_LIVE_WATCHING_LIST"
+            - "SC_LIVE_END"
+            - "SC_ERROR"
+        wait_until_live:
+          type: boolean
+          title: "等待开播"
+          description: "开启后，若房间未直播则轮询直至开播再采集"
+          default: false
+        wait_timeout_seconds:
+          type: integer
+          title: "等待开播的时长上限：秒"
+          description: "默认 24 小时，超时后任务停止"
+          default: 86400
+      required: ["principal_id"]
+    output_schema:
+      principal_id: {type: VARCHAR, label: "principal_id"}
+      live_stream_id: {type: VARCHAR, label: "直播流 ID"}
+      event_type: {type: VARCHAR, label: "事件类型"}
+      raw_cmd: {type: VARCHAR, label: "原始命令"}
+      uid: {type: VARCHAR, label: "用户 UID"}
+      nickname: {type: VARCHAR, label: "用户昵称"}
+      content: {type: VARCHAR, label: "内容"}
+      online_count: {type: BIGINT, label: "在线人数"}
+      online_count_str: {type: VARCHAR, label: "在线人数文案"}
+      like_count_str: {type: VARCHAR, label: "点赞数文案"}
+      gift_id: {type: VARCHAR, label: "礼物 ID"}
+      gift_count: {type: BIGINT, label: "礼物数量"}
+      error_code: {type: BIGINT, label: "错误码"}
+      ts: {type: DOUBLE, label: "相对时间"}
+      payload: {type: VARCHAR, label: "原始载荷 JSON"}
+
+

@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crawlhub"
+# Version is the single manual source of truth and must follow PEP 440.
+# CHANGELOG:
+#   1.1.0 (2026-06-06) — Kuaishou: enter-room event, wealth_grade, giftType;
+#                         Bilibili: super_chat, guard_buy; Douyin: member/gift/social.
+#   1.0.0 (2026-05-xx) — Initial release.
+version = "1.1.0"
+description = "Unified crawler platform - one daemon, all platforms"
+
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "click>=8.1",
+    "httpx>=0.27.0",
+    "requests>=2.31",
+    "apscheduler>=3.10",
+    "openpyxl>=3.1",
+    "websockets>=12.0",
+    "duckdb>=1.0.0",
+    "mcp[cli]>=1.0.0",
+    "playwright>=1.40.0",
+    "patchright>=1.58.0",
+    "gmssl>=3.2",
+    "beautifulsoup4>=4.12",
+    "python-dateutil>=2.8",
+    "pycryptodome>=3.19",
+    "qrcode>=7.4",
+    "psutil>=5.9",
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+# Deprecated old CLI - will be removed in future version
+crawlhub = "crawlhub.cli.main:main"
+crawlhub-mcp = "crawlhub.cli.mcp_server:main"
+
+[tool.hatch.build]
+# Include Nuitka-compiled binaries in the built wheel.  Without this,
+# Hatchling treats *.pyd / *.so as build artifacts and excludes them.
+artifacts = [
+    "crawlhub/**/*.pyd",
+    "crawlhub/**/*.so",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["crawlhub"]
+# NOTE: Hatchling produces a py3-none-any wheel by default.
+# build_pyd.py re-tags the produced wheel as cp3X-cp3X-<plat> using
+# `python -m wheel tags` after this build step finishes, because the
+# wheel contains Nuitka-compiled .pyd/.so binaries.
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "crawlhub",
+    "tests",
+    "scripts",
+    "pyproject.toml",
+    "README*",
+    "AGENTS.md",
+    "CLAUDE.md",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "skeleton: placeholder test that intentionally skips (will be filled in by implementer agent)",
+    "integration: integration tests that require external services",
+]

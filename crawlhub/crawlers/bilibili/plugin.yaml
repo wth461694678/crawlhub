@@ -1,0 +1,491 @@
+# plugin.yaml — Bilibili platform plugin manifest
+#
+# Entry point: crawlhub.crawlers.bilibili.service:BilibiliService
+
+name: bilibili
+display_name: "B站"
+version: "1.0.0"
+description: "Scrapes Bilibili videos, comments, and video details."
+entry: crawlhub.crawlers.bilibili.service:BilibiliService
+
+cookie:
+  required: true
+  description: "Bilibili storage_state cookie (from Playwright)"
+
+# R7 Observability — 声明本插件用了 websockets（live_protocol.py），让 plugin loader 校验 patch 覆盖
+transport_libraries:
+  - websockets   # live_protocol.py 用
+
+actions:
+  search_videos:
+    display_name: "搜索视频"
+    description: "搜索B站视频（按关键词），返回 BV号、标题、作者、播放/弹幕/评论数等元数据"
+    output_dataclass: "crawlhub.crawlers.bilibili.crawler.models:SearchResult"
+    input_schema:
+      type: object
+      properties:
+        keyword:
+          type: string
+          title: "搜索关键词"
+          description: "搜索关键词"
+        max_results:
+          type: integer
+          title: "最大结果数"
+          description: "最大结果数，工具会自动翻页直至取够"
+          default: 20
+        sort_type:
+          type: string
+          title: "排序方式"
+          description: "B站搜索 API 原生支持的 5 种排序"
+          default: "totalrank"
+          enum: ["totalrank", "click", "pubdate", "dm", "stow"]
+          enum_labels: ["综合排序（默认）", "最多播放", "最新发布", "最多弹幕", "最多收藏"]
+      required: ["keyword"]
+    output_schema:
+      bvid:
+        type: VARCHAR
+        label: "BV 号"
+        description: "B站视频 BV 号（如 BV1xx411c7mD）"
+      aid:
+        type: BIGINT
+        label: "AV 号"
+        description: "B站视频数字 ID（旧版标识）"
+      title:
+        type: VARCHAR
+        label: "标题"
+      author:
+        type: VARCHAR
+        label: "作者昵称"
+      author_uid:
+        type: BIGINT
+        label: "作者 UID"
+      play_count:
+        type: BIGINT
+        label: "播放量"
+      danmaku_count:
+        type: BIGINT
+        label: "弹幕数"
+      reply_count:
+        type: BIGINT
+        label: "评论数"
+      pubdate:
+        type: VARCHAR
+        label: "发布时间"
+      duration:
+        type: VARCHAR
+        label: "时长"
+        description: "时长字符串，如 '12:34'"
+      description:
+        type: VARCHAR
+        label: "简介"
+      cover:
+        type: VARCHAR
+        label: "封面 URL"
+
+  get_video_detail:
+    display_name: "视频详情"
+    description: "获取B站视频详情（标题、作者、播放/点赞/投币/收藏/分享数、分区、发布时间等）"
+    output_dataclass: "crawlhub.crawlers.bilibili.crawler.models:VideoDetail"
+    input_schema:
+      type: object
+      properties:
+        video_id:
+          type: string
+          title: "视频标识"
+          description: "视频标识：BV号（如 BV1xx411c7mD）、AV号（如 av170001 或纯数字）、或完整视频URL"
+      required: ["video_id"]
+    output_schema:
+      bvid:
+        type: VARCHAR
+        label: "BV 号"
+      aid:
+        type: VARCHAR
+        label: "AV 号"
+      title:
+        type: VARCHAR
+        label: "标题"
+      description:
+        type: VARCHAR
+        label: "简介"
+      duration:
+        type: INTEGER
+        label: "时长"
+        description: "时长（秒）"
+      owner_name:
+        type: VARCHAR
+        label: "UP 主昵称"
+      owner_mid:
+        type: VARCHAR
+        label: "UP 主 UID"
+      view_count:
+        type: BIGINT
+        label: "播放量"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      coin_count:
+        type: BIGINT
+        label: "投币数"
+      share_count:
+        type: BIGINT
+        label: "分享数"
+      reply_count:
+        type: BIGINT
+        label: "评论数"
+      danmaku_count:
+        type: BIGINT
+        label: "弹幕数"
+      favorite_count:
+        type: BIGINT
+        label: "收藏数"
+      pub_date:
+        type: BIGINT
+        label: "发布时间戳"
+        description: "Unix 时间戳（秒）"
+      tname:
+        type: VARCHAR
+        label: "分区名"
+      pic:
+        type: VARCHAR
+        label: "封面 URL"
+
+  scrape_comments:
+    display_name: "爬取评论"
+    description: "爬取单个B站视频评论（含楼中楼可选），多视频请改用批处理任务"
+    output_dataclass: "crawlhub.crawlers.bilibili.crawler.models:Comment"
+    input_schema:
+      type: object
+      properties:
+        video_id:
+          type: string
+          title: "视频标识"
+          description: "视频标识：BV号、AV号或URL"
+        max_comments:
+          type: integer
+          title: "最大评论数"
+          description: "单视频最大获取评论数"
+        mode:
+          type: integer
+          title: "评论排序"
+          description: "评论排序方式"
+          default: 3
+          enum: [3, 2, 1]
+          enum_labels: ["热度推荐（默认）", "最多点赞", "最新发布"]
+        include_sub_comments:
+          type: boolean
+          title: "抓取楼中楼"
+          description: "是否抓取楼中楼回复，开启后耗时显著增加"
+          default: false
+      required: ["video_id", "max_comments"]
+    output_schema:
+      rpid:
+        type: BIGINT
+        label: "评论 ID"
+      uid:
+        type: BIGINT
+        label: "评论者 UID"
+      uname:
+        type: VARCHAR
+        label: "评论者昵称"
+      content:
+        type: VARCHAR
+        label: "评论内容"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      reply_count:
+        type: BIGINT
+        label: "回复数"
+      ctime:
+        type: VARCHAR
+        label: "发布时间"
+      floor:
+        type: INTEGER
+        label: "楼层"
+      ip_location:
+        type: VARCHAR
+        label: "IP 属地"
+      is_sub_comment:
+        type: BOOLEAN
+        label: "是否楼中楼"
+      parent_rpid:
+        type: BIGINT
+        label: "父评论 ID"
+        description: "楼中楼回复的父评论 ID；主楼为 0"
+      bvid:
+        type: VARCHAR
+        label: "所属视频 BV 号"
+      _source_video:
+        type: VARCHAR
+        label: "来源视频标识"
+        description: "批处理时记录该条评论的来源视频"
+
+  get_video_ai_summary:
+    display_name: "视频 AI 总结"
+    description: "获取 B 站官方视频 AI 总结（view/conclusion/get，wbi 签名）。仅传 video_id，内部自动解析 cid 与 up_mid。注意：并非所有视频都有AI总结。"
+    output_dataclass: "crawlhub.crawlers.bilibili.crawler.models:VideoAISummary"
+    input_schema:
+      type: object
+      properties:
+        video_id:
+          type: string
+          title: "视频标识"
+          description: "BV号、AV号或完整视频URL"
+        cid:
+          type: integer
+          title: "分 P cid (可选)"
+          description: "分 P 的 cid，留空时自动从视频详情解析"
+        up_mid:
+          type: integer
+          title: "UP 主 UID (可选)"
+          description: "UP 主 mid，留空时自动从视频详情解析"
+      required: ["video_id"]
+    output_schema:
+      bvid:
+        type: VARCHAR
+        label: "BV 号"
+      cid:
+        type: BIGINT
+        label: "分 P cid"
+        description: "签名素材，原样回写便于复核"
+      up_mid:
+        type: BIGINT
+        label: "UP 主 UID"
+        description: "签名素材"
+      has_summary:
+        type: BOOLEAN
+        label: "是否有总结"
+        description: "为 false 时 summary 为空字符串（视频无 AI 总结时的正常返回）"
+      summary:
+        type: VARCHAR
+        label: "AI 总结"
+        description: "已规整：去换行、英文逗号转中文逗号"
+
+  search_live_rooms:
+    display_name: "搜索直播间"
+    description: "搜索 B站直播间，返回房间号、主播、标题、在线人数、分区等信息"
+    output_dataclass: "crawlhub.crawlers.bilibili.crawler.models:LiveRoomSearchResult"
+    runtime: stateless
+    transport: http
+    throttle_scope: task
+    input_schema:
+      type: object
+      properties:
+        keyword:
+          type: string
+          title: "搜索关键词"
+          description: "直播间搜索关键词"
+        max_results:
+          type: integer
+          title: "最大结果数"
+          default: 20
+        live_only:
+          type: boolean
+          title: "仅直播中"
+          default: false
+      required: ["keyword"]
+    output_schema:
+      room_id: {type: BIGINT, label: "房间号"}
+      uid: {type: BIGINT, label: "主播 UID"}
+      uname: {type: VARCHAR, label: "主播昵称"}
+      title: {type: VARCHAR, label: "直播标题"}
+      online: {type: BIGINT, label: "在线人数"}
+      live_status: {type: INTEGER, label: "直播状态"}
+      is_live: {type: BOOLEAN, label: "是否直播中"}
+      area_name: {type: VARCHAR, label: "分区"}
+      cover: {type: VARCHAR, label: "封面"}
+      user_cover: {type: VARCHAR, label: "主播头像"}
+      live_time: {type: VARCHAR, label: "开播时间"}
+      tags: {type: VARCHAR, label: "标签"}
+      keyword: {type: VARCHAR, label: "搜索关键词"}
+
+  get_live_room_info:
+    display_name: "直播间详情"
+    description: "获取 B站直播间快照信息"
+    output_dataclass: "crawlhub.crawlers.bilibili.crawler.models:LiveRoomInfoRecord"
+    runtime: stateless
+    transport: http
+    throttle_scope: task
+    input_schema:
+      type: object
+      properties:
+        room_id:
+          type: string
+          title: "房间号或 URL"
+          description: "支持短号、长号或 live.bilibili.com URL"
+      required: ["room_id"]
+    output_schema:
+      room_id: {type: BIGINT, label: "房间号"}
+      short_id: {type: BIGINT, label: "短号"}
+      uid: {type: BIGINT, label: "主播 UID"}
+      title: {type: VARCHAR, label: "直播标题"}
+      live_status: {type: INTEGER, label: "直播状态"}
+      is_live: {type: BOOLEAN, label: "是否直播中"}
+      live_time: {type: VARCHAR, label: "开播时间"}
+      online: {type: BIGINT, label: "在线人数"}
+      area_id: {type: BIGINT, label: "分区 ID"}
+      area_name: {type: VARCHAR, label: "分区"}
+      parent_area_id: {type: BIGINT, label: "父分区 ID"}
+      parent_area_name: {type: VARCHAR, label: "父分区"}
+      uname: {type: VARCHAR, label: "主播昵称"}
+      face: {type: VARCHAR, label: "主播头像"}
+      follower_num: {type: BIGINT, label: "粉丝数"}
+      cover: {type: VARCHAR, label: "封面"}
+      keyframe: {type: VARCHAR, label: "关键帧"}
+      fetched_at: {type: VARCHAR, label: "抓取时间"}
+
+  collect_live_events:
+    display_name: "采集直播事件"
+    description: "采集 B站直播 WebSocket 事件流（弹幕、在线人气、进房、点赞、礼物等）。直播结束（PREPARING 信号）会自动停止。"
+    output_dataclass: "crawlhub.crawlers.bilibili.crawler.models:LiveEventRecord"
+    runtime: stateless
+    transport: websocket
+    throttle_scope: none
+    input_schema:
+      type: object
+      properties:
+        room_id:
+          type: string
+          title: "房间号或 URL"
+        duration_seconds:
+          type: integer
+          title: "采集时长上限（秒）"
+          description: "留空=持续爬取直到下播或手动取消"
+        event_filter:
+          type: array
+          title: "关注的事件类型"
+          description: "勾选关注的直播事件，留空 = 全部保留"
+          items:
+            type: string
+            enum:
+              - "DANMU_MSG"
+              - "INTERACT_WORD"
+              - "ENTRY_EFFECT"
+              - "INTERACT_WORD_V2"
+              - "LIKE_INFO_V3_CLICK"
+              - "LIKE_INFO_V3_UPDATE"
+              - "SEND_GIFT"
+              - "COMBO_SEND"
+              - "GUARD_BUY"
+              - "USER_TOAST_MSG"
+              - "USER_TOAST_MSG_V2"
+              - "GUARD_HONOR_THOUSAND"
+              - "SUPER_CHAT_MESSAGE"
+              - "SUPER_CHAT_MESSAGE_JPN"
+              - "SUPER_CHAT_MESSAGE_DELETE"
+              - "ROOM_REAL_TIME_MESSAGE_UPDATE"
+              - "WATCHED_CHANGE"
+              - "ONLINE_RANK_COUNT"
+              - "ONLINE_RANK_V2"
+              - "ONLINE_RANK_V3"
+              - "ONLINE_RANK_TOP3"
+              - "POPULARITY_RED_POCKET_NEW"
+              - "POPULARITY_RED_POCKET_START"
+              - "POPULARITY_RED_POCKET_WINNER_LIST"
+              - "POPULARITY_RED_POCKET_V2_NEW"
+              - "POPULARITY_RED_POCKET_V2_START"
+              - "POPULARITY_RED_POCKET_V2_WINNER_LIST"
+              - "ANCHOR_LOT_START"
+              - "ANCHOR_LOT_END"
+              - "ANCHOR_LOT_AWARD"
+              - "ANCHOR_LOT_CHECKSTATUS"
+              - "NOTICE_MSG"
+              - "LIVE"
+              - "PREPARING"
+              - "CUT_OFF"
+              - "WARNING"
+              - "CUT_OFF_V2"
+              - "ROOM_BLOCK_MSG"
+              - "ROOM_LOCK"
+              - "ROOM_CHANGE"
+              - "ROOM_SKIN_MSG"
+              - "STOP_LIVE_ROOM_LIST"
+              - "GUARD_BUY_GIFT"
+              - "WIN_LOTTERY_NOTICE"
+              - "WIDGET_GIFT_STAR_PROCESS"
+            enum_labels:
+              - "弹幕（DANMU_MSG）"
+              - "进房（INTERACT_WORD）"
+              - "入场特效（ENTRY_EFFECT）"
+              - "进房V2（INTERACT_WORD_V2）"
+              - "点赞（LIKE_INFO_V3_CLICK）"
+              - "点赞数变化（LIKE_INFO_V3_UPDATE）"
+              - "礼物（SEND_GIFT）"
+              - "礼物连击（COMBO_SEND）"
+              - "上舰（GUARD_BUY）"
+              - "上舰广播（USER_TOAST_MSG）"
+              - "上舰广播V2（USER_TOAST_MSG_V2）"
+              - "千舰广播（GUARD_HONOR_THOUSAND）"
+              - "醒目留言（SUPER_CHAT_MESSAGE）"
+              - "醒目留言日语（SUPER_CHAT_MESSAGE_JPN）"
+              - "SC删除（SUPER_CHAT_MESSAGE_DELETE）"
+              - "粉丝数变化（ROOM_REAL_TIME_MESSAGE_UPDATE）"
+              - "看过人数（WATCHED_CHANGE）"
+              - "高能榜数（ONLINE_RANK_COUNT）"
+              - "高能榜（ONLINE_RANK_V2）"
+              - "高能榜V3（ONLINE_RANK_V3）"
+              - "高能榜TOP3（ONLINE_RANK_TOP3）"
+              - "人气红包-新（POPULARITY_RED_POCKET_NEW）"
+              - "人气红包-开始（POPULARITY_RED_POCKET_START）"
+              - "人气红包-中奖（POPULARITY_RED_POCKET_WINNER_LIST）"
+              - "人气红包V2-新（POPULARITY_RED_POCKET_V2_NEW）"
+              - "人气红包V2-开始（POPULARITY_RED_POCKET_V2_START）"
+              - "人气红包V2-中奖（POPULARITY_RED_POCKET_V2_WINNER_LIST）"
+              - "天选时刻-开始（ANCHOR_LOT_START）"
+              - "天选时刻-结束（ANCHOR_LOT_END）"
+              - "天选时刻-开奖（ANCHOR_LOT_AWARD）"
+              - "天选时刻-状态（ANCHOR_LOT_CHECKSTATUS）"
+              - "系统广播（NOTICE_MSG）"
+              - "开播（LIVE）"
+              - "下播（PREPARING）"
+              - "切断直播（CUT_OFF）"
+              - "警告（WARNING）"
+              - "切断直播V2（CUT_OFF_V2）"
+              - "直播间被封（ROOM_BLOCK_MSG）"
+              - "直播间锁定（ROOM_LOCK）"
+              - "房间信息变更（ROOM_CHANGE）"
+              - "房间皮肤变更（ROOM_SKIN_MSG）"
+              - "全局停播列表（STOP_LIVE_ROOM_LIST）"
+              - "上舰送礼（GUARD_BUY_GIFT）"
+              - "中奖通知（WIN_LOTTERY_NOTICE）"
+              - "礼物星球进度（WIDGET_GIFT_STAR_PROCESS）"
+          default:
+            - "DANMU_MSG"
+            - "INTERACT_WORD"
+            - "SEND_GIFT"
+            - "COMBO_SEND"
+            - "LIKE_INFO_V3_CLICK"
+            - "GUARD_BUY"
+            - "USER_TOAST_MSG"
+            - "SUPER_CHAT_MESSAGE"
+            - "WATCHED_CHANGE"
+            - "ONLINE_RANK_COUNT"
+            - "ROOM_REAL_TIME_MESSAGE_UPDATE"
+            - "PREPARING"
+            - "LIVE"
+        wait_until_live:
+          type: boolean
+          title: "等待开播"
+          description: "开启后，若房间未直播则轮询直至开播再采集"
+          default: false
+        wait_timeout_seconds:
+          type: integer
+          title: "等待开播的等待秒数上限"
+          description: "默认 24 小时，超时后任务停止"
+          default: 86400
+      required: ["room_id"]
+    output_schema:
+      room_id: {type: BIGINT, label: "房间号"}
+      event_type: {type: VARCHAR, label: "事件类型"}
+      raw_cmd: {type: VARCHAR, label: "原始命令"}
+      uid: {type: VARCHAR, label: "用户 UID"}
+      nickname: {type: VARCHAR, label: "用户昵称"}
+      content: {type: VARCHAR, label: "内容"}
+      popularity: {type: BIGINT, label: "人气值"}
+      online_count: {type: BIGINT, label: "在线人数"}
+      like_count: {type: BIGINT, label: "点赞数"}
+      gift_id: {type: VARCHAR, label: "礼物 ID"}
+      gift_name: {type: VARCHAR, label: "礼物名称"}
+      gift_count: {type: BIGINT, label: "礼物数量"}
+      ts: {type: DOUBLE, label: "相对时间"}
+      payload: {type: VARCHAR, label: "原始载荷 JSON"}

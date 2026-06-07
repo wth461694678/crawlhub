@@ -1,0 +1,24 @@
+# Build artifacts
+__pycache__/
+*.pyc
+*.pyd
+*.so
+*.pyi
+*.py.bak
+*.egg-info/
+build_nuitka/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Local config
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large session recording files (not for distribution)
+*.cra.json

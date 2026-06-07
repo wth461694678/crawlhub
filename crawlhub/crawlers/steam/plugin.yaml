@@ -1,0 +1,636 @@
+name: steam
+display_name: "Steam"
+version: "1.0.0"
+description: "Steam 平台 — 搜索游戏、获取游戏详情、爬取评测、每周热销榜"
+entry: crawlhub.crawlers.steam.service:SteamService
+cookie:
+  required: false
+  stores: ["steam.json"]
+  description: "Steam 登录态 Cookie（可选，用于提升爬取可靠性；Steam 可匿名使用）"
+
+actions:
+  get_user_tags:
+    display_name: "用户标签"
+    description: "获取 Steam 商店页上玩家自由打的标签（一条记录 = 一个标签），按页面顺序写入；语言由 language 控制"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:UserTag"
+    input_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+          title: "Steam App ID"
+          description: "Steam App ID（纯数字字符串，例如 '730' = CS2）"
+        language:
+          type: string
+          title: "语言"
+          description: "Steam 语言代码，影响标签文本的本地化"
+          enum: ["schinese", "english", "japanese"]
+          enum_labels: ["简体中文", "English", "日本語"]
+          default: "schinese"
+      required: ["app_id"]
+    output_schema:
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      tag:
+        type: VARCHAR
+        label: "标签文本"
+        description: "本地化后的标签字符串"
+      rank:
+        type: int
+        label: "页面位次"
+        description: "1-based，越靠前热度越高（按页面顺序）"
+      crawl_time:
+        type: VARCHAR
+        label: "抓取时间"
+        description: "ISO8601"
+
+  get_weekly_topsellers:
+    display_name: "每周热销榜"
+    description: "获取 Steam 每周热销榜（Protobuf API），返回带排名的游戏列表，支持历史周回溯和不同地区"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:TopSellingItem"
+    input_schema:
+      type: object
+      properties:
+        date:
+          type: string
+          title: "目标周日期 YYYY-MM-DD"
+          description: "该周内任意一天均可，不填则取当前周"
+        country:
+          type: string
+          title: "国家/地区代码"
+          description: "ISO-3166 alpha-2，影响货币和上架范围"
+          default: "US"
+        language:
+          type: string
+          title: "语言"
+          description: "Steam 语言代码"
+          enum: ["schinese", "english", "japanese"]
+          enum_labels: ["简体中文", "English", "日本語"]
+          default: "schinese"
+        count:
+          type: integer
+          title: "返回结果数量"
+          description: "Steam 单次最大约 100 条"
+          default: 20
+      required: ["country", "language", "count"]
+    output_schema:
+      rank:
+        type: int
+        label: "排名"
+        description: "本周榜单中的名次（从 1 开始）"
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      game_name:
+        type: VARCHAR
+        label: "游戏名称"
+
+  # ════════════════════════════════════════════════════════════
+  # JSON-API ACTIONS — Steam 官方 JSON / Protobuf 接口
+  # ════════════════════════════════════════════════════════════
+
+  scrape_reviews:
+    display_name: "爬取评测"
+    description: "通过官方 appreviews JSON 接口爬取评测（字段丰富、稳定，不依赖 HTML）"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:ReviewItem"
+    input_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+          title: "Steam App ID"
+          description: "Steam App ID"
+        max_reviews:
+          type: integer
+          title: "最多抓取条数"
+          description: "0 = 不限，直至游标耗尽"
+          default: 100
+        language:
+          type: string
+          title: "评测语言"
+          description: "all / schinese / english / japanese ..."
+          default: "all"
+        review_type:
+          type: string
+          title: "评测倾向"
+          enum: ["all", "positive", "negative"]
+          enum_labels: ["全部", "正面", "负面"]
+          default: "all"
+        purchase_type:
+          type: string
+          title: "购买类型"
+          enum: ["all", "steam", "non_steam_purchase"]
+          enum_labels: ["全部", "Steam", "非 Steam"]
+          default: "all"
+        day_range:
+          type: integer
+          title: "评论回溯天数"
+          description: "仅获取前N天新增的评论（1=今天，2=今天+昨天，以此类推，0 = 不限），注意：仅当评测语言='all' 时生效"
+          default: 0
+        filter:
+          type: string
+          title: "排序模式"
+          enum: ["recent", "updated", "all"]
+          enum_labels: ["最新", "最近更新", "按权重(可配合 day_range)"]
+          default: "recent"
+      required: ["app_id", "max_reviews", "language", "review_type", "purchase_type", "day_range", "filter"]
+    output_schema:
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      recommendationid:
+        type: VARCHAR
+        label: "评测 ID"
+        description: "Steam 内部唯一标识；可用于去重"
+      author_steamid:
+        type: VARCHAR
+        label: "作者 Steam ID"
+      author_num_games_owned:
+        type: int
+        label: "作者拥有游戏数"
+      author_num_reviews:
+        type: int
+        label: "作者总评测数"
+      author_playtime_forever:
+        type: int
+        label: "作者总游戏时长"
+        description: "单位：分钟"
+      author_playtime_at_review:
+        type: int
+        label: "评测时游戏时长"
+        description: "单位：分钟（评测撰写时刻的时长）"
+      author_last_played:
+        type: int
+        label: "作者最后游玩时间"
+        description: "Unix 秒级时间戳"
+      language:
+        type: VARCHAR
+        label: "评测语言"
+      review:
+        type: VARCHAR
+        label: "评测正文"
+      timestamp_created:
+        type: int
+        label: "创建时间"
+        description: "Unix 秒级时间戳"
+      timestamp_updated:
+        type: int
+        label: "更新时间"
+        description: "Unix 秒级时间戳"
+      voted_up:
+        type: bool
+        label: "是否推荐"
+        description: "true = 推荐，false = 不推荐"
+      votes_up:
+        type: int
+        label: "有用票数"
+      votes_funny:
+        type: int
+        label: "搞笑票数"
+      weighted_vote_score:
+        type: VARCHAR
+        label: "加权投票分"
+        description: "字符串浮点数（0~1）；Steam 评测排序权重"
+      comment_count:
+        type: int
+        label: "评论数"
+      steam_purchase:
+        type: bool
+        label: "是否 Steam 购买"
+      received_for_free:
+        type: bool
+        label: "是否免费获取"
+      written_during_early_access:
+        type: bool
+        label: "抢先体验阶段撰写"
+      primarily_steam_deck:
+        type: bool
+        label: "主要在 Steam Deck 上游玩"
+
+  get_game_detail:
+    display_name: "完整详情"
+    description: "通过官方 appdetails 接口获取游戏完整画像（比 get_game_info 字段多得多：分类、价格、平台、媒体资源等）"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:GameDetail"
+    input_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+          title: "Steam App ID"
+          description: "Steam App ID"
+        cc:
+          type: string
+          title: "区域代码"
+          description: "价格/可购性随区域不同，ISO-3166 alpha-2"
+          default: "us"
+        language:
+          type: string
+          title: "语言"
+          enum: ["schinese", "english", "japanese"]
+          enum_labels: ["简体中文", "English", "日本語"]
+          default: "schinese"
+      required: ["app_id", "cc", "language"]
+    output_schema:
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      name:
+        type: VARCHAR
+        label: "游戏名称"
+      type:
+        type: VARCHAR
+        label: "条目类型"
+        description: "game / dlc / demo / advertising 等"
+      is_free:
+        type: bool
+        label: "是否免费"
+      detailed_description:
+        type: VARCHAR
+        label: "详细描述"
+        description: "HTML，含格式化标签"
+      about_the_game:
+        type: VARCHAR
+        label: "关于本游戏"
+        description: "HTML"
+      short_description:
+        type: VARCHAR
+        label: "简短描述"
+      supported_languages:
+        type: VARCHAR
+        label: "支持语言"
+        description: "原始 HTML，含星号注释"
+      header_image:
+        type: VARCHAR
+        label: "头图 URL"
+      capsule_image:
+        type: VARCHAR
+        label: "胶囊图 URL"
+      website:
+        type: VARCHAR
+        label: "官网 URL"
+      developers:
+        type: JSON
+        label: "开发商列表"
+      publishers:
+        type: JSON
+        label: "发行商列表"
+      price_overview:
+        type: JSON
+        label: "价格概览"
+        description: "{currency, initial, final, discount_percent, ...}；免费游戏可能为空"
+      platforms:
+        type: JSON
+        label: "支持平台"
+        description: "{windows: bool, mac: bool, linux: bool}"
+      categories:
+        type: JSON
+        label: "Steam 功能分类"
+        description: "如单人/多人/成就/云存档；带 id 和描述"
+      genres:
+        type: JSON
+        label: "游戏类型标签"
+      screenshots:
+        type: JSON
+        label: "截图列表"
+      movies:
+        type: JSON
+        label: "宣传视频列表"
+      recommendations_total:
+        type: int
+        label: "评测总数"
+      achievements_total:
+        type: int
+        label: "成就总数"
+      release_date:
+        type: JSON
+        label: "发售日期"
+        description: "{coming_soon: bool, date: string}"
+      metacritic_score:
+        type: int
+        label: "Metacritic 评分"
+        description: "0~100；缺失时为 0 / null"
+      metacritic_url:
+        type: VARCHAR
+        label: "Metacritic 详情页"
+      required_age:
+        type: int
+        label: "推荐年龄"
+      controller_support:
+        type: VARCHAR
+        label: "手柄支持"
+        description: "full / partial / 空字符串"
+      crawl_time:
+        type: VARCHAR
+        label: "抓取时间"
+        description: "ISO8601"
+
+  get_current_players:
+    display_name: "当前在线"
+    description: "获取游戏当前实时在线人数（CCU）"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:CurrentPlayers"
+    input_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+          title: "Steam App ID"
+          description: "Steam App ID"
+      required: ["app_id"]
+    output_schema:
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      player_count:
+        type: int
+        label: "当前在线人数"
+        description: "实时 CCU；轮询间隔过短时 Steam 可能返回相同值"
+      result:
+        type: int
+        label: "API 返回码"
+        description: "1 = 成功；其他值表示请求异常或不存在"
+      crawl_time:
+        type: VARCHAR
+        label: "抓取时间"
+        description: "ISO8601"
+
+  get_achievement_percentages:
+    display_name: "成就达成率"
+    description: "获取游戏所有成就的全球达成率（一条记录 = 一个成就）；数据源于 steamcommunity.com 公共统计页面，含本地化的显示名/描述/图标。注意：超大成就集（如 CS2、Dota2）页面会被 Steam 截断，可能拿不全。"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:AchievementPercentage"
+    input_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+          title: "Steam App ID"
+          description: "Steam App ID"
+        language:
+          type: string
+          title: "语言"
+          description: "Steam 语言代码，影响 display_name / description 的本地化"
+          enum: ["schinese", "english", "japanese"]
+          enum_labels: ["简体中文", "English", "日本語"]
+          default: "schinese"
+      required: ["app_id"]
+    output_schema:
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      display_name:
+        type: VARCHAR
+        label: "成就显示名"
+        description: "本地化后的成就标题（来自 stats 页面 h3）"
+      description:
+        type: VARCHAR
+        label: "成就描述"
+        description: "本地化后的成就说明（来自 stats 页面 h5）"
+      icon_url:
+        type: VARCHAR
+        label: "成就图标 URL"
+        description: "已解锁/彩色图标；公开页面不暴露灰色版本"
+      percent:
+        type: float
+        label: "全球达成率"
+        description: "百分比（0~100）"
+      crawl_time:
+        type: VARCHAR
+        label: "抓取时间"
+        description: "ISO8601"
+
+  search_games:
+    display_name: "搜索游戏"
+    description: "通过 storesearch JSON 搜索游戏，返回字段丰富（type / metascore / streamingvideo 等）"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:SearchGameResult"
+    input_schema:
+      type: object
+      properties:
+        keyword:
+          type: string
+          title: "搜索关键词"
+          description: "搜索关键词"
+        max_results:
+          type: integer
+          title: "最大结果数"
+          default: 10
+        cc:
+          type: string
+          title: "区域代码"
+          description: "影响价格货币"
+          default: "US"
+        language:
+          type: string
+          title: "语言"
+          enum: ["schinese", "english", "japanese"]
+          enum_labels: ["简体中文", "English", "日本語"]
+          default: "schinese"
+      required: ["keyword", "max_results", "cc", "language"]
+    output_schema:
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      name:
+        type: VARCHAR
+        label: "游戏名称"
+      type:
+        type: VARCHAR
+        label: "条目类型"
+        description: "game / dlc / app / bundle 等"
+      tiny_image:
+        type: VARCHAR
+        label: "小图 URL"
+      small_capsule:
+        type: VARCHAR
+        label: "胶囊图 URL"
+      price:
+        type: JSON
+        label: "价格信息"
+        description: "{currency, initial, final, discount_percent}"
+      platforms:
+        type: JSON
+        label: "支持平台"
+      streamingvideo:
+        type: bool
+        label: "是否有流媒体视频"
+      controller_support:
+        type: VARCHAR
+        label: "手柄支持"
+        description: "full / partial / 空字符串"
+      metascore:
+        type: VARCHAR
+        label: "Metacritic 评分"
+        description: "字符串原文，可能为空"
+      store_url:
+        type: VARCHAR
+        label: "商店页 URL"
+
+  get_news:
+    display_name: "获取游戏官方新闻公告"
+    description: "获取游戏官方新闻/公告，contents 不截断，不过滤 feed"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:NewsItem"
+    input_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+          title: "Steam App ID"
+          description: "Steam App ID"
+        count:
+          type: integer
+          title: "最多返回条数"
+          default: 20
+      required: ["app_id", "count"]
+    output_schema:
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      gid:
+        type: VARCHAR
+        label: "公告 ID"
+        description: "Steam 内部唯一 ID"
+      title:
+        type: VARCHAR
+        label: "标题"
+      url:
+        type: VARCHAR
+        label: "公告 URL"
+      is_external_url:
+        type: bool
+        label: "是否外链"
+      author:
+        type: VARCHAR
+        label: "作者"
+      contents:
+        type: VARCHAR
+        label: "正文"
+        description: "BBCode/HTML 原文，不截断"
+      feedlabel:
+        type: VARCHAR
+        label: "Feed 显示名"
+      feedname:
+        type: VARCHAR
+        label: "Feed 内部名"
+        description: "可作为过滤参数 feeds 使用"
+      feed_type:
+        type: int
+        label: "Feed 类型码"
+      date:
+        type: int
+        label: "发布时间"
+        description: "Unix 秒级时间戳"
+      tags:
+        type: JSON
+        label: "标签列表"
+
+  get_review_histogram:
+    display_name: "评测时间分布"
+    description: "获取 Steam 商店页评测时间柱状图原始数据。返回两段拼接的时间序列：rollups 是全历史粗粒度（month/week，由服务端决定，客户端无法指定），recent 是最近 30 天的逐日数据；每个 bucket 标注是否落在 past_events 评测轰炸区间（is_review_bombing=true 对应商店页上灰色背景）。注意：只有 filter_offtopic_activity 真正影响数字；底层端点的 l/review_score_preference/rollup_type 都不会改变返回数据，因此不暴露。"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:ReviewHistogramBucket"
+    input_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+          title: "Steam App ID"
+          description: "纯数字字符串"
+        filter_offtopic_activity:
+          type: integer
+          title: "过滤跑题评测"
+          enum: [0, 1]
+          enum_labels: ["保留全部评测", "过滤跑题/轰炸"]
+          default: 1
+      required: ["app_id"]
+    output_schema:
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      bucket_type:
+        type: VARCHAR
+        label: "数据段类型"
+        description: "rollup=全历史粗粒度，recent=近 30 天逐日"
+      rollup_type:
+        type: VARCHAR
+        label: "聚合粒度"
+        description: "month / week（rollup 段，服务端决定）；recent 段固定为 day"
+      date_unix:
+        type: int
+        label: "桶起始时间"
+        description: "Unix 秒级时间戳（UTC）"
+      date_iso:
+        type: VARCHAR
+        label: "桶起始日期"
+        description: "YYYY-MM-DD（UTC）"
+      recommendations_up:
+        type: int
+        label: "好评数"
+      recommendations_down:
+        type: int
+        label: "差评数"
+      total_reviews:
+        type: int
+        label: "评测总数"
+        description: "= up + down"
+      positive_pct:
+        type: float
+        label: "好评率"
+        description: "百分比（0~100），保留两位小数"
+      is_review_bombing:
+        type: bool
+        label: "是否落入评测轰炸区间"
+        description: "true 表示该 bucket 命中 past_events 中的某个区间"
+      filter_offtopic_activity:
+        type: int
+        label: "请求侧 filter 状态"
+        description: "回显请求时的取值（1=过滤 / 0=保留），便于多次抓取对比"
+      crawl_time:
+        type: VARCHAR
+        label: "抓取时间"
+        description: "ISO8601"
+
+  get_review_language_breakdown:
+    display_name: "评测语言细分"
+    description: "获取游戏评测的语言空间分布（对应商店页 \"查看语言细分表\" 弹窗）。返回三类：your_language 当前 UI 语言对应的分数（最多 1 条），other 其它有独立评分的语言（0..N），all_languages 全部语言聚合（最多 1 条，附 total_languages_count）。说明：该端点所有参数都不影响数字，只影响文案；为了保证 tooltip 正则解析稳定，服务端固定以 l=english 抓取。"
+    output_dataclass: "crawlhub.crawlers.steam.crawler.models:ReviewLanguageScore"
+    input_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+          title: "Steam App ID"
+          description: "纯数字字符串"
+      required: ["app_id"]
+    output_schema:
+      app_id:
+        type: VARCHAR
+        label: "Steam App ID"
+      bucket:
+        type: VARCHAR
+        label: "记录类型"
+        description: "your_language / other / all_languages"
+      language:
+        type: VARCHAR
+        label: "语言"
+        description: "Steam 显示的语言名（your_language 与 other 有值；all_languages 为空）"
+      rating_text:
+        type: VARCHAR
+        label: "文字评级"
+        description: "Very Positive / Mostly Positive / Mixed / ... 部分 tooltip 缺失时回填自 span 文字"
+      positive_pct:
+        type: int
+        label: "好评率"
+        description: "百分比（0~100，整数；Steam tooltip 已四舍五入）"
+      total_reviews:
+        type: int
+        label: "评测总数"
+      has_review_bombing_filter:
+        type: bool
+        label: "tooltip 提及评测轰炸过滤"
+        description: "true 表示该语言/该聚合曾发生跑题轰炸事件"
+      total_languages_count:
+        type: int
+        label: "Total: All N languages"
+        description: "仅 all_languages 行有值，其它行为 0"
+      crawl_time:
+        type: VARCHAR
+        label: "抓取时间"
+        description: "ISO8601"

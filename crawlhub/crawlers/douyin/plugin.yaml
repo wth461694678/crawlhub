@@ -1,0 +1,385 @@
+# Douyin (抖音) Platform Plugin
+# Migrated from services/douyin.py in Task 5.2
+
+name: douyin
+display_name: 抖音
+version: "1.0.0"
+description: "抖音视频搜索、详情获取、评论爬取"
+
+entry: crawlhub.crawlers.douyin.service:DouyinService
+
+cookie:
+  required: true
+  format: douyin_cookie
+  storage_path: data/cookie.json
+
+# R7 Observability — 声明本插件用了 websockets（live_protocol.py），让 plugin loader 校验 patch 覆盖
+transport_libraries:
+  - websockets   # live_protocol.py 用
+
+actions:
+  search_videos:
+    display_name: "搜索视频"
+    description: 搜索抖音视频（BBA 浏览器会话），返回 aweme_id、文案、作者、点赞/评论/分享数等
+    output_dataclass: "crawlhub.crawlers.douyin.crawler.models:SearchResult"
+    runtime: browser_backed
+    throttle_scope: request
+    browser:
+      session_scope: platform_cookie
+    input_schema:
+
+      type: object
+      properties:
+        keyword:
+          type: string
+          title: "搜索关键词"
+          description: 搜索关键词
+        max_results:
+          type: integer
+          title: "最大结果数"
+          description: 最大结果数，工具会自动翻页
+          default: 20
+        sort_type:
+          type: integer
+          title: "排序方式"
+          description: 结果排序方式
+          default: 0
+          enum: [0, 1, 2]
+          enum_labels: ["综合排序（相关度+热度）", "最多点赞", "最新发布"]
+        publish_time:
+          type: integer
+          title: "发布时间"
+          description: 官方接口提供的过滤条件
+          default: 0
+          enum: [0, 1, 7, 180]
+
+          enum_labels: ["全部时间（默认）", "一天内", "一周内", "半年内"]
+      required: ["keyword", "max_results"]
+    output_schema:
+      aweme_id:
+        type: VARCHAR
+        label: "视频 ID"
+        description: "抖音视频 19 位数字 ID"
+      title:
+        type: VARCHAR
+        label: "视频文案"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      comment_count:
+        type: BIGINT
+        label: "评论数"
+      share_count:
+        type: BIGINT
+        label: "分享数"
+      author_uid:
+        type: VARCHAR
+        label: "作者 UID"
+      author_name:
+        type: VARCHAR
+        label: "作者昵称"
+      keyword:
+        type: VARCHAR
+        label: "搜索关键词"
+        description: "回填触发该结果的搜索词"
+
+  get_video_detail:
+    display_name: "视频详情"
+    description: 获取抖音视频详情（标题、作者、点赞/评论/分享/收藏/播放数、时长、封面等）
+    output_dataclass: "crawlhub.crawlers.douyin.crawler.models:VideoInfo"
+    input_schema:
+      type: object
+      properties:
+        video_id:
+          type: string
+          title: "视频标识"
+          description: "19 位数字aweme_id 或 视频URL"
+      required: ["video_id"]
+    output_schema:
+      aweme_id:
+        type: VARCHAR
+        label: "视频 ID"
+      title:
+        type: VARCHAR
+        label: "视频文案"
+      author_name:
+        type: VARCHAR
+        label: "作者昵称"
+      author_uid:
+        type: VARCHAR
+        label: "作者 UID"
+      author_sec_uid:
+        type: VARCHAR
+        label: "作者 sec_uid"
+        description: "抖音内部使用的加密用户 ID"
+      digg_count:
+        type: BIGINT
+        label: "点赞数"
+      comment_count:
+        type: BIGINT
+        label: "评论数"
+      share_count:
+        type: BIGINT
+        label: "分享数"
+      collect_count:
+        type: BIGINT
+        label: "收藏数"
+      play_count:
+        type: BIGINT
+        label: "播放数"
+      duration:
+        type: INTEGER
+        label: "时长"
+        description: "时长（毫秒）"
+      create_time:
+        type: BIGINT
+        label: "发布时间戳"
+        description: "Unix 时间戳（秒）"
+      cover_url:
+        type: VARCHAR
+        label: "封面 URL"
+      fetched_at:
+        type: VARCHAR
+        label: "抓取时间"
+        description: "本条记录的抓取时刻 ISO8601"
+
+  scrape_comments:
+    display_name: "爬取评论"
+    description: 爬取单个抖音视频评论（含回复关系）
+    output_dataclass: "crawlhub.crawlers.douyin.crawler.models:Comment"
+    input_schema:
+      type: object
+      properties:
+        video_id:
+          type: string
+          title: "视频标识"
+          description: "19 位数字aweme_id 或 URL"
+        max_comments:
+          type: integer
+          title: "最大评论数"
+          description: "单视频最大评论数"
+        comment_sort:
+          type: integer
+          title: "评论排序"
+          description: 官方接口提供
+          default: 0
+          enum: [0, 2]
+          enum_labels: ["按热度（默认）", "按时间（最新优先）"]
+      required: ["video_id", "max_comments"]
+    output_schema:
+      cid:
+        type: VARCHAR
+        label: "评论 ID"
+      text:
+        type: VARCHAR
+        label: "评论内容"
+      aweme_id:
+        type: VARCHAR
+        label: "所属视频 ID"
+      create_time:
+        type: BIGINT
+        label: "发布时间戳"
+        description: "Unix 时间戳（秒）"
+      digg_count:
+        type: BIGINT
+        label: "点赞数"
+      reply_comment_total:
+        type: BIGINT
+        label: "回复数"
+      user_id:
+        type: VARCHAR
+        label: "评论者 UID"
+      user_nickname:
+        type: VARCHAR
+        label: "评论者昵称"
+      user_sec_uid:
+        type: VARCHAR
+        label: "评论者 sec_uid"
+      is_author_digged:
+        type: BOOLEAN
+        label: "作者是否点赞"
+      reply_to_reply_id:
+        type: VARCHAR
+        label: "回复的子评论 ID"
+        description: "若该楼层是对子评论的二次回复，记录被回复的子评论 ID"
+      reply_to_user_id:
+        type: VARCHAR
+        label: "被回复用户 UID"
+      reply_to_user_nickname:
+        type: VARCHAR
+        label: "被回复用户昵称"
+      is_sub_comment:
+        type: BOOLEAN
+        label: "是否楼中楼"
+      parent_comment_id:
+        type: VARCHAR
+        label: "父评论 ID"
+      _source_video:
+        type: VARCHAR
+        label: "来源视频"
+        description: "批处理时记录该条评论的来源视频"
+
+  search_live_rooms:
+    display_name: "搜索直播间"
+    description: "搜索抖音直播间，返回 web_rid、房间号、主播、标题、观众数和播放流地址"
+    output_dataclass: "crawlhub.crawlers.douyin.crawler.models:LiveRoomSearchResult"
+    runtime: browser_backed
+    transport: http
+    throttle_scope: request
+    browser:
+      session_scope: platform_cookie
+    input_schema:
+      type: object
+      properties:
+        keyword:
+          type: string
+          title: "搜索关键词"
+        max_results:
+          type: integer
+          title: "最大结果数"
+          default: 20
+        live_only:
+          type: boolean
+          title: "仅直播中"
+          description: "客户端过滤"
+          default: false
+        sort_by:
+          type: string
+          title: "排序方式"
+          description: "抖音搜索接口不支持服务端排序，由客户端处理"
+          default: "default"
+          enum: ["default", "user_count"]
+          enum_labels: ["默认排序（接口原序）", "按观众数降序"]
+      required: ["keyword"]
+    output_schema:
+      web_rid: {type: VARCHAR, label: "web_rid"}
+      room_id: {type: VARCHAR, label: "房间 ID"}
+      title: {type: VARCHAR, label: "直播标题"}
+      user_count: {type: BIGINT, label: "观众数"}
+      status: {type: INTEGER, label: "直播状态"}
+      author_nickname: {type: VARCHAR, label: "主播昵称"}
+      author_uid: {type: VARCHAR, label: "主播 UID"}
+      author_sec_uid: {type: VARCHAR, label: "主播 sec_uid"}
+      cover_url: {type: VARCHAR, label: "封面"}
+      stream_flv: {type: VARCHAR, label: "FLV 流"}
+      stream_hls: {type: VARCHAR, label: "HLS 流"}
+      keyword: {type: VARCHAR, label: "搜索关键词"}
+
+  get_live_room_info:
+    display_name: "直播间详情"
+    description: "获取抖音直播间详情"
+    output_dataclass: "crawlhub.crawlers.douyin.crawler.models:LiveRoomInfoRecord"
+    runtime: browser_backed
+    transport: http
+    throttle_scope: request
+    browser:
+      session_scope: platform_cookie
+    input_schema:
+      type: object
+      properties:
+        web_rid:
+          type: string
+          title: "web_rid 或直播间 URL"
+      required: ["web_rid"]
+    output_schema:
+      web_rid: {type: VARCHAR, label: "web_rid"}
+      room_id: {type: VARCHAR, label: "房间 ID"}
+      status: {type: INTEGER, label: "直播状态"}
+      status_str: {type: VARCHAR, label: "状态文案"}
+      title: {type: VARCHAR, label: "直播标题"}
+      user_count: {type: BIGINT, label: "观众数"}
+      user_count_str: {type: VARCHAR, label: "观众数文案"}
+      like_count: {type: BIGINT, label: "点赞数"}
+      owner_uid: {type: VARCHAR, label: "主播 UID"}
+      owner_sec_uid: {type: VARCHAR, label: "主播 sec_uid"}
+      owner_nickname: {type: VARCHAR, label: "主播昵称"}
+      cover_url: {type: VARCHAR, label: "封面"}
+      stream_flv_origin: {type: VARCHAR, label: "FLV 原始流"}
+      stream_hls_origin: {type: VARCHAR, label: "HLS 原始流"}
+      fetched_at: {type: VARCHAR, label: "抓取时间"}
+
+  collect_live_events:
+    display_name: "采集直播事件"
+    description: "采集抖音直播 WebSocket 事件流（弹幕、在线人数、进房、点赞、礼物等）。直播结束（WebcastControlMessage status=3）会自动停止。"
+    output_dataclass: "crawlhub.crawlers.douyin.crawler.models:LiveEventRecord"
+    runtime: browser_backed
+    transport: websocket
+    throttle_scope: none
+    browser:
+      session_scope: platform_cookie
+    input_schema:
+      type: object
+      properties:
+        web_rid:
+          type: string
+          title: "web_rid 或直播间 URL"
+        duration_seconds:
+          type: integer
+          title: "采集时长上限（秒）"
+          description: "留空=持续爬取直到下播或手动取消"
+        event_filter:
+          type: array
+          title: "关注的事件类型"
+          description: "勾选关注的直播事件，留空 = 全部保留"
+          items:
+            type: string
+            enum:
+              - "WebcastChatMessage"
+              - "WebcastEmojiChatMessage"
+              - "WebcastScreenChatMessage"
+              - "WebcastGiftMessage"
+              - "WebcastLikeMessage"
+              - "WebcastMemberMessage"
+              - "WebcastSocialMessage"
+              - "WebcastFansclubMessage"
+              - "WebcastRoomStatsMessage"
+              - "WebcastRoomUserSeqMessage"
+              - "WebcastRoomRankMessage"
+              - "WebcastRoomMessage"
+              - "WebcastControlMessage"
+            enum_labels:
+              - "弹幕（WebcastChatMessage）"
+              - "Emoji 弹幕（WebcastEmojiChatMessage）"
+              - "飘屏弹幕（WebcastScreenChatMessage）"
+              - "礼物（WebcastGiftMessage）"
+              - "点赞（WebcastLikeMessage）"
+              - "进房（WebcastMemberMessage）"
+              - "关注/分享（WebcastSocialMessage）"
+              - "粉丝团动作（WebcastFansclubMessage）"
+              - "在线人数（WebcastRoomStatsMessage）"
+              - "观众榜单（WebcastRoomUserSeqMessage）"
+              - "排行榜（WebcastRoomRankMessage）"
+              - "房间信息（WebcastRoomMessage）"
+              - "直播状态（WebcastControlMessage）"
+          default:
+            - "WebcastChatMessage"
+            - "WebcastGiftMessage"
+            - "WebcastLikeMessage"
+            - "WebcastMemberMessage"
+            - "WebcastSocialMessage"
+            - "WebcastRoomStatsMessage"
+            - "WebcastControlMessage"
+        wait_until_live:
+          type: boolean
+          title: "等待开播"
+          description: "开启后，若房间未直播则轮询直至开播再采集"
+          default: false
+        wait_timeout_seconds:
+          type: integer
+          title: "等待开播的秒数上限"
+          description: "默认 24 小时，超时后任务停止"
+          default: 86400
+      required: ["web_rid"]
+    output_schema:
+      web_rid: {type: VARCHAR, label: "web_rid"}
+      event_type: {type: VARCHAR, label: "事件类型"}
+      raw_cmd: {type: VARCHAR, label: "原始命令"}
+      uid: {type: VARCHAR, label: "用户 UID"}
+      nickname: {type: VARCHAR, label: "用户昵称"}
+      content: {type: VARCHAR, label: "内容"}
+      online_count: {type: BIGINT, label: "在线人数"}
+      like_count: {type: BIGINT, label: "点赞数"}
+      gift_id: {type: VARCHAR, label: "礼物 ID"}
+      gift_count: {type: BIGINT, label: "礼物数量"}
+      ts: {type: DOUBLE, label: "相对时间"}
+      payload: {type: VARCHAR, label: "原始载荷 JSON"}

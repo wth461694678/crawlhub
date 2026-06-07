@@ -1,0 +1,331 @@
+# plugin.yaml — Weibo platform plugin manifest
+#
+# Entry point: crawlhub.crawlers.weibo.service:WeiboService
+
+name: weibo
+display_name: "微博"
+version: "1.0.0"
+description: "Scrapes Weibo posts, comments, and user info."
+entry: crawlhub.crawlers.weibo.service:WeiboService
+
+cookie:
+  required: true
+  description: "Weibo cookie JSON (output/.weibo_cookie.json)"
+
+actions:
+  search_posts:
+    display_name: "搜索帖子"
+    description: "搜索微博帖子（按关键词），支持排序/时间区间/仅原创过滤"
+    output_dataclass: "crawlhub.crawlers.weibo.crawler.models:WeiboPost"
+    input_schema:
+      type: object
+      properties:
+        keyword:
+          type: string
+          title: "搜索关键词"
+          description: "搜索关键词"
+        sort:
+          type: string
+          title: "排序方式"
+          description: "结果排序方式"
+          default: "default"
+          enum: ["default", "time", "hot"]
+          enum_labels: ["综合排序（默认）", "按时间（最新）", "按热度"]
+        max_pages:
+          type: integer
+          title: "最大翻页数"
+          description: "最大翻页数"
+          default: 3
+        time_start:
+          type: string
+          title: "起始日期"
+          description: "格式 YYYY-MM-DD"
+        time_end:
+          type: string
+          title: "结束日期"
+          description: "格式 YYYY-MM-DD"
+        only_original:
+          type: boolean
+          title: "仅原创"
+          description: "剔除转发"
+          default: false
+      required: ["keyword", "max_pages"]
+    output_schema:
+      source_type:
+        type: VARCHAR
+        label: "来源类型"
+        description: "搜索 / 用户主页等来源标记"
+      mid:
+        type: VARCHAR
+        label: "微博 ID"
+      user_name:
+        type: VARCHAR
+        label: "作者昵称"
+      user_uid:
+        type: VARCHAR
+        label: "作者 UID"
+      verified:
+        type: VARCHAR
+        label: "认证类型"
+      content:
+        type: VARCHAR
+        label: "正文"
+      pub_time:
+        type: VARCHAR
+        label: "发布时间"
+      source:
+        type: VARCHAR
+        label: "客户端来源"
+        description: "如 iPhone 客户端 / 微博 web 等"
+      repost_count:
+        type: BIGINT
+        label: "转发数"
+      comment_count:
+        type: BIGINT
+        label: "评论数"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      topic_tags:
+        type: VARCHAR
+        label: "话题标签"
+        description: "以 # 包裹的话题列表，多值用逗号分隔"
+      url:
+        type: VARCHAR
+        label: "微博链接"
+
+  get_user_info:
+    display_name: "用户信息"
+    description: "获取微博用户资料（昵称、简介、认证、互动数据、粉丝数、地域等）"
+    output_dataclass: "crawlhub.crawlers.weibo.crawler.models:WeiboUserBrief"
+    input_schema:
+      type: object
+      properties:
+        uid:
+          type: integer
+          title: "用户 UID"
+          description: "纯数字，可在用户主页 URL weibo.com/u/<uid> 中找到"
+      required: ["uid"]
+    output_schema:
+      uid:
+        type: BIGINT
+        label: "用户 UID"
+      screen_name:
+        type: VARCHAR
+        label: "昵称"
+      description:
+        type: VARCHAR
+        label: "简介"
+      verified:
+        type: BOOLEAN
+        label: "是否认证"
+      verified_reason:
+        type: VARCHAR
+        label: "认证说明"
+      comment_cnt:
+        type: BIGINT
+        label: "评论总数"
+      repost_cnt:
+        type: BIGINT
+        label: "转发总数"
+      like_cnt:
+        type: BIGINT
+        label: "点赞总数"
+      total_cnt:
+        type: BIGINT
+        label: "互动总数"
+      followers_count:
+        type: BIGINT
+        label: "粉丝数"
+      friends_count:
+        type: BIGINT
+        label: "关注数"
+      statuses_count:
+        type: BIGINT
+        label: "微博数"
+      gender:
+        type: VARCHAR
+        label: "性别"
+      location:
+        type: VARCHAR
+        label: "地域"
+
+  scrape_comments:
+    display_name: "爬取评论"
+    description: "爬取单条微博的评论，多帖子请改用批处理任务"
+    output_dataclass: "crawlhub.crawlers.weibo.crawler.models:WeiboComment"
+    input_schema:
+      type: object
+      properties:
+        mid:
+          type: string
+          title: "微博 ID"
+          description: "帖子mid 或微博 URL"
+        max_comments_per_post:
+          type: integer
+          title: "单条帖子最大评论数"
+          default: 20
+      required: ["mid", "max_comments_per_post"]
+    output_schema:
+      source_mid:
+        type: VARCHAR
+        label: "所属微博 ID"
+      comment_id:
+        type: VARCHAR
+        label: "评论 ID"
+      user_name:
+        type: VARCHAR
+        label: "评论者昵称"
+      user_uid:
+        type: VARCHAR
+        label: "评论者 UID"
+      content:
+        type: VARCHAR
+        label: "评论内容"
+      pub_time:
+        type: VARCHAR
+        label: "发布时间"
+      source:
+        type: VARCHAR
+        label: "客户端来源"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      floor:
+        type: INTEGER
+        label: "楼层"
+      _source_post:
+        type: VARCHAR
+        label: "来源帖子"
+        description: "批处理时记录该条评论的来源微博 mid"
+
+  scrape_user_posts:
+    display_name: "爬取用户帖子"
+    description: "爬取单个用户发布的微博帖子（可选同时抓评论）"
+    output_dataclass: "crawlhub.crawlers.weibo.crawler.models:WeiboPost"
+    input_schema:
+      type: object
+      properties:
+        uid:
+          type: integer
+          title: "用户 UID"
+          description: "纯数字"
+        max_post_pages:
+          type: integer
+          title: "最大翻页数"
+          description: "最大翻页数"
+          default: 3
+        fetch_comments:
+          type: boolean
+          title: "同时抓评论"
+          description: "是否同时抓取每条帖子的评论"
+          default: false
+      required: ["uid", "max_post_pages"]
+    output_schema:
+      source_type:
+        type: VARCHAR
+        label: "来源类型"
+      mid:
+        type: VARCHAR
+        label: "微博 ID"
+      user_name:
+        type: VARCHAR
+        label: "作者昵称"
+      user_uid:
+        type: VARCHAR
+        label: "作者 UID"
+      verified:
+        type: VARCHAR
+        label: "认证类型"
+      content:
+        type: VARCHAR
+        label: "正文"
+      pub_time:
+        type: VARCHAR
+        label: "发布时间"
+      source:
+        type: VARCHAR
+        label: "客户端来源"
+      repost_count:
+        type: BIGINT
+        label: "转发数"
+      comment_count:
+        type: BIGINT
+        label: "评论数"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      topic_tags:
+        type: VARCHAR
+        label: "话题标签"
+        description: "以 # 包裹的话题列表，多值用逗号分隔"
+      url:
+        type: VARCHAR
+        label: "微博链接"
+
+  get_post_detail:
+    display_name: "帖子详情"
+    description: "获取单条微博帖子的详细信息（正文、互动数据、发布地域、图片数等）"
+    output_dataclass: "crawlhub.crawlers.weibo.crawler.models:WeiboPostDetail"
+    input_schema:
+      type: object
+      properties:
+        id:
+          type: string
+          title: "帖子 ID 或 URL"
+          description: "帖子 mid（纯数字）或完整微博 URL（如 https://weibo.com/123/abc）"
+      required: ["id"]
+    output_schema:
+      mid:
+        type: VARCHAR
+        label: "微博 ID"
+      mblogid:
+        type: VARCHAR
+        label: "短 ID"
+        description: "用于构建短链的 mblogid"
+      user_name:
+        type: VARCHAR
+        label: "作者昵称"
+      user_uid:
+        type: VARCHAR
+        label: "作者 UID"
+      verified:
+        type: VARCHAR
+        label: "是否认证"
+      content:
+        type: VARCHAR
+        label: "正文"
+      pub_time:
+        type: VARCHAR
+        label: "发布时间"
+      source:
+        type: VARCHAR
+        label: "客户端来源"
+      region_name:
+        type: VARCHAR
+        label: "发布地域"
+        description: "如 发布于 河南"
+      repost_count:
+        type: BIGINT
+        label: "转发数"
+      comment_count:
+        type: BIGINT
+        label: "评论数"
+      like_count:
+        type: BIGINT
+        label: "点赞数"
+      pic_num:
+        type: INTEGER
+        label: "图片数"
+      is_long_text:
+        type: BOOLEAN
+        label: "长文"
+      text_length:
+        type: INTEGER
+        label: "正文长度"
+      topic_tags:
+        type: VARCHAR
+        label: "话题标签"
+      url:
+        type: VARCHAR
+        label: "微博链接"

@@ -23,8 +23,13 @@ from pathlib import Path
 
 from qcloud_cos import CosConfig, CosS3Client
 
-# PEP 503 index prefix on COS
-PREFIX = "packages/crawlhub"
+# PEP 503 index prefix on COS (standard: /simple/<package>/)
+PREFIX = "simple/crawlhub"
+
+# COS bucket info (static website hosting enabled)
+BUCKET_NAME = "crawlhub-pypi-1340752493"
+BUCKET_REGION = "ap-guangzhou"
+STATIC_WEBSITE_URL = f"{BUCKET_NAME}.cos-website.{BUCKET_REGION}.myqcloud.com"
 
 
 def get_client() -> CosS3Client:
@@ -109,12 +114,11 @@ def main():
     all_wheels = list_existing_wheels(client, bucket)
     print(f"  Found {len(all_wheels)} wheels total")
 
-    # Step 3: Generate and upload PEP 503 index
+    # Step 3: Generate and upload PEP 503 index for crawlhub/
     print("[3/3] Regenerating PEP 503 index...")
     index_html = generate_index_html(all_wheels)
     index_key = f"{PREFIX}/index.html"
 
-    # Write to temp file and upload
     import tempfile
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False, encoding="utf-8") as f:
@@ -130,8 +134,28 @@ def main():
     os.unlink(tmp_path)
     print(f"  [OK] {index_key}")
 
+    # Step 4: Generate root /simple/index.html listing all packages
+    print("[4/4] Regenerating root index...")
+    root_index = '<!DOCTYPE html>\n<html><head><title>Simple Index</title></head>\n<body>\n'
+    root_index += '<a href="crawlhub/">crawlhub</a>\n'
+    root_index += '</body></html>'
+    root_key = "simple/index.html"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False, encoding="utf-8") as f:
+        f.write(root_index)
+        tmp_path = f.name
+
+    client.upload_file(
+        Bucket=bucket,
+        Key=root_key,
+        LocalFilePath=tmp_path,
+        ContentType="text/html",
+    )
+    os.unlink(tmp_path)
+    print(f"  [OK] {root_key}")
+
     print("\n[OK] All done!")
-    print(f"  Install: pip install crawlhub --index-url https://{bucket}.cos.{os.environ['COS_REGION']}.myqcloud.com/packages/")
+    print(f"  Install: pip install crawlhub --extra-index-url https://{STATIC_WEBSITE_URL}/simple/")
 
 
 if __name__ == "__main__":

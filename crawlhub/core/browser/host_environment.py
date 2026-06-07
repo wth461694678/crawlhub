@@ -260,18 +260,42 @@ def _detect_screen_size() -> tuple[int, int]:
 
     # ── macOS ──
     elif sysname == "Darwin":
+        # 优先用 AppKit 取逻辑像素（Retina 已自动折算），且
+        # visibleFrame 已排除菜单栏和 Dock，避免窗口顶出屏幕。
+        try:
+            import AppKit
+            screen = AppKit.NSScreen.mainScreen()
+            if screen is not None:
+                vf = screen.visibleFrame()
+                w = int(vf.size.width)
+                h = int(vf.size.height)
+                if w > 0 and h > 0:
+                    return w, h
+        except Exception as exc:
+            logger.warning("[host_env] mac screen detect (AppKit) failed: %s", exc)
+
+        # fallback: system_profiler 取的是物理像素，必须除以
+        # backingScaleFactor 才是逻辑像素；同时无法排除菜单栏/Dock。
         try:
             import subprocess
             out = subprocess.check_output(
                 ["system_profiler", "SPDisplaysDataType"],
                 timeout=5, encoding="utf-8", errors="ignore",
             )
-            # 多显示器场景取第一条 Resolution（主屏）
             m = re.search(r"Resolution:\s+(\d+)\s*x\s*(\d+)", out)
             if m:
-                return int(m.group(1)), int(m.group(2))
+                physical_w = int(m.group(1))
+                physical_h = int(m.group(2))
+                # 尝试读取 backingScaleFactor；取不到则默认 2.0
+                try:
+                    scale = AppKit.NSScreen.mainScreen().backingScaleFactor()
+                except Exception:
+                    scale = 2.0
+                w = max(1, int(physical_w / scale))
+                h = max(1, int(physical_h / scale))
+                return w, h
         except Exception as exc:
-            logger.warning("[host_env] mac screen detect failed: %s", exc)
+            logger.warning("[host_env] mac screen detect (fallback) failed: %s", exc)
 
     # ── Linux ──
     elif sysname == "Linux":

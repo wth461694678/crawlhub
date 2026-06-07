@@ -62,7 +62,7 @@ def list_existing_wheels(client: CosS3Client, bucket: str) -> list[str]:
     filenames = []
     marker = ""
     while True:
-        resp = client.get_bucket(
+        resp = client.list_objects(
             Bucket=bucket, Prefix=PREFIX, Delimiter="", Marker=marker, MaxKeys=1000
         )
         for obj in resp.get("Contents", []):

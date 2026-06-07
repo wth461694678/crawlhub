@@ -34,7 +34,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          pip install nuitka ordered-set build wheel
+          pip install nuitka ordered-set build wheel hatchling
           pip install -r requirements.txt
 
       # macOS needs Xcode command line tools for Nuitka C compilation

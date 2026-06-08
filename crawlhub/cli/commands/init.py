@@ -239,8 +239,54 @@ def _setup_config(host: str | None, port: int | None, force: bool) -> str:
         save_config(cfg)
         return f"created, bind={cfg.host}:{cfg.port}"
 
-    # Config exists — only touch it if --force.
+    # Config exists — check for missing fields & update if needed.
     existing = load_config()
+    _missing = []
+    # 检查 config.yaml 原始 YAML 中是否缺少 CrawlHubConfig 的字段。
+    # 不能用 hasattr(existing, ...) 因为 dataclass 属性总是存在（有默认值）。
+    # 必须读取原始 YAML 文件来判断哪些键缺失。
+    import yaml as _yaml
+    with open(config_path, "r", encoding="utf-8") as _f:
+        _raw_yaml = _yaml.safe_load(_f) or {}
+    _required_keys = {
+        "archived_purge_days",
+        "observability",
+        "browser",
+    }
+    for _key in _required_keys:
+        if _key not in _raw_yaml:
+            _missing.append(_key)
+            if _key == "archived_purge_days":
+                existing.archived_purge_days = 30
+            elif _key == "observability":
+                from crawlhub.core.config import ObservabilityConfig
+                existing.observability = ObservabilityConfig()
+            elif _key == "browser":
+                from crawlhub.core.config import BrowserGlobalConfig
+                existing.browser = BrowserGlobalConfig()
+
+    # 更新 host/port（仅在 --force 或用户指定了新值时）
+    if force:
+        if host is not None:
+            existing.host = host
+        if port is not None:
+            existing.port = port
+
+    if _missing:
+        save_config(existing)
+        import crawlhub.core.config as _cfg_mod
+        _cfg_mod._config_instance = None
+        if force:
+            return (
+                f"updated, bind={existing.host}:{existing.port} "
+                f"(added missing fields: {', '.join(_missing)})"
+            )
+        else:
+            return (
+                f"already exists at {existing.host}:{existing.port} "
+                f"(auto-added missing fields: {', '.join(_missing)})"
+            )
+
     if not force:
         if host is not None or port is not None:
             return (
@@ -249,7 +295,7 @@ def _setup_config(host: str | None, port: int | None, force: bool) -> str:
             )
         return f"already exists, bind={existing.host}:{existing.port}"
 
-    # --force path: update host/port, preserve other fields.
+    # --force path (no missing fields found): update host/port, preserve other fields.
     if host is not None:
         existing.host = host
     if port is not None:
@@ -370,4 +416,9 @@ def _verify_stealth_assets() -> str:
         raise RuntimeError("; ".join(issues))
 
     size_kb = _STEALTH_JS_PATH.stat().st_size // 1024
-    return f"stealth.min.js={size_kb}KB, UA=Chrome/147, anti-automation=on"
+    # 动态提取 Chrome major 版本号（如 "148"），而非硬编码。
+    # _REAL_USER_AGENT 格式示例："... Chrome/148.0.0.0 Safari/..."
+    import re
+    _ua_major_match = re.search(r"Chrome/(\d+)", _REAL_USER_AGENT)
+    _ua_major = _ua_major_match.group(1) if _ua_major_match else "???"
+    return f"stealth.min.js={size_kb}KB, UA=Chrome/{_ua_major}, anti-automation=on"

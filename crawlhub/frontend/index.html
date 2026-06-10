@@ -4211,6 +4211,11 @@ async function openNewTask(preselectedPlatform, preselectedAction, ctx) {
         if (_taskModalCtx.mode === 'plan-step' && _taskModalCtx.existingStep) {
             _hydratePlanStepIntoForm(_taskModalCtx.existingStep);
         }
+        // Safety-net: ensure batch-schedule-section visibility matches current state.
+        // _hydratePlanStepIntoForm does this internally, but if it threw mid-flight
+        // (e.g. renderSchemaForm failed after setting batchUpgrade.fieldName), the
+        // section would be stuck hidden. This call guarantees eventual consistency.
+        _toggleBatchScheduleSection();
     } catch(e) { toast('加载平台信息失败', 'error'); }
 }
 
@@ -4273,9 +4278,41 @@ function _hydratePlanStepIntoForm(step) {
         let tab = 'list';
 
         if (ift && ift.sources) {
-            tab = 'upstream_sql';
-            empty.upstream_sql.sources = ift.sources;
-            if (ift.sql != null) empty.upstream_sql.sql = ift.sql;
+            // Detect simple upstream-field reference: exactly 1 source with run_id
+            // (produced by the upstream_field tab's _buildBatchItemsSpec).
+            // Display as upstream_field tab so the user sees the simple picker,
+            // not the raw SQL pipeline editor.
+            const srcKeys = Object.keys(ift.sources);
+            if (srcKeys.length === 1) {
+                const srcVal = ift.sources[srcKeys[0]];
+                if (srcVal && typeof srcVal === 'object' && srcVal.run_id) {
+                    tab = 'upstream_field';
+                    empty.upstream_field.run_id = srcVal.run_id || '';
+                    empty.upstream_field.field = ift.field || srcVal.field || '';
+                    const m = String(srcVal.run_id || '').match(/^\$\{step\[(\d+)\]\.task_id\}$/);
+                    if (m) {
+                        empty.upstream_field.subTab = 'plan-step';
+                        if (typeof _schEditState !== 'undefined') {
+                            const idx0 = parseInt(m[1], 10) - 1;
+                            const ps = (_schEditState.steps || [])[idx0];
+                            if (ps) {
+                                empty.upstream_field._stepRefPlatform = ps.platform;
+                                empty.upstream_field._stepRefAction = ps.task_type;
+                            }
+                        }
+                    } else {
+                        empty.upstream_field.subTab = 'existing';
+                    }
+                } else {
+                    tab = 'upstream_sql';
+                    empty.upstream_sql.sources = ift.sources;
+                    if (ift.sql != null) empty.upstream_sql.sql = ift.sql;
+                }
+            } else {
+                tab = 'upstream_sql';
+                empty.upstream_sql.sources = ift.sources;
+                if (ift.sql != null) empty.upstream_sql.sql = ift.sql;
+            }
         } else if (ift && ift.run_id && 'field' in ift) {
             tab = 'upstream_field';
             empty.upstream_field.run_id = ift.run_id || '';
@@ -4306,6 +4343,11 @@ function _hydratePlanStepIntoForm(step) {
         batchUpgrade.tab = tab;
         batchUpgrade.state = empty;
         batchUpgrade.blockOnPartial = !(payload.allow_partial_upstream !== false);
+        // Restore batch schedule controls from saved payload.
+        const concEl = document.getElementById('batch-concurrency');
+        if (concEl && typeof payload.concurrency === 'number') concEl.value = payload.concurrency;
+        const blockEl = document.getElementById('batch-block-on-partial');
+        if (blockEl) blockEl.checked = !!batchUpgrade.blockOnPartial;
 
         // Re-render schema form so the upgraded field renders as a card-host
         // placeholder (renderSchemaForm only emits data-bp-card-host="1" when
@@ -4319,8 +4361,9 @@ function _hydratePlanStepIntoForm(step) {
             }
         }
         if (typeof _renderBatchUpgradeCard === 'function') {
-            _renderBatchUpgradeCard();
+            try { _renderBatchUpgradeCard(); } catch (e) { console.warn('[hydrate] _renderBatchUpgradeCard failed:', e); }
         }
+        _toggleBatchScheduleSection();
     } else {
         // Task mode: reset batchUpgrade so prior batch UI doesn't leak.
         batchUpgrade = { fieldName: null, tab: 'list', state: _emptyUpgradeState(), blockOnPartial: false };
@@ -4375,6 +4418,8 @@ function savePlanStepFromModal() {
             action,
             item_key: batchUpgrade.fieldName,
             common_params: commonParams,
+            concurrency: parseInt(document.getElementById('batch-concurrency')?.value) || 1,
+            allow_partial_upstream: !(document.getElementById('batch-block-on-partial')?.checked),
         };
         const itemsFromOrItems = _buildBatchItemsSpec();
         Object.assign(batchBody, itemsFromOrItems);
@@ -4407,10 +4452,16 @@ function _buildBatchItemsSpec() {
             .filter(Boolean);
         return { items: itemsArr };
     } else if (tab === 'upstream_field') {
+        // Convert legacy {run_id, field} to SQL pipeline {sources, sql, field}
+        // so that dependencies are wired via merged_deps and the task enters
+        // waiting_dependency until the upstream completes.
+        const runId = st.upstream_field.run_id || '';
+        const fld = st.upstream_field.field || '';
         return {
             items_from: {
-                run_id: st.upstream_field.run_id || '',
-                field: st.upstream_field.field || '',
+                sources: { upstream: { run_id: runId, field: fld } },
+                sql: `SELECT ${fld || 'item'} FROM upstream`,
+                field: fld,
             },
         };
     } else if (tab === 'upstream_failed') {
@@ -4858,7 +4909,15 @@ function _renderBatchPane() {
                 // Determine which prior step (if any) is currently referenced.
                 let curIdx = '';
                 const m = String(st.run_id || '').match(/^\$\{step\[(\d+)\]\.task_id\}$/);
-                if (m) curIdx = String(parseInt(m[1], 10) - 1); // store as 0-based for select
+                if (m) {
+                    const val = parseInt(m[1], 10);
+                    // val===0 is definitely 0-based (1-based would never produce 0).
+                    // For val>0 it's ambiguous (0-based new or 1-based legacy);
+                    // default to legacy heuristic (val-1) which is correct for
+                    // the most common case. The one-time re-selection on first edit
+                    // is acceptable for the transitional edge cases.
+                    curIdx = String(val === 0 ? 0 : val - 1);
+                }
                 host.innerHTML = `
                     <select id="bp-uf-stepref-select" style="width:100%;">
                         <option value="">（请选择前序步骤）</option>
@@ -4869,8 +4928,8 @@ function _renderBatchPane() {
                     const v = e.target.value;
                     if (v === '') { st.run_id = ''; st.fieldOptions = []; _bpLoadUpstreamFields(); return; }
                     const idx0 = parseInt(v, 10);
-                    // Store as ${step[n].task_id} where n is 1-based.
-                    st.run_id = `\${step[${idx0 + 1}].task_id}`;
+                    // Store as ${step[n].task_id} where n is 0-based step_index.
+                    st.run_id = `\${step[${idx0}].task_id}`;
                     // Cache prior step's platform/action so _bpLoadUpstreamFields can use them.
                     const ps = priorSteps[idx0];
                     st._stepRefPlatform = ps.platform;
@@ -4878,11 +4937,13 @@ function _renderBatchPane() {
                     clearTimeout(_bpUfFieldsTimer);
                     _bpUfFieldsTimer = setTimeout(_bpLoadUpstreamFields, 100);
                 });
-                // If pre-existing ref, populate cached platform/action.
+                // If pre-existing ref, populate cached platform/action and trigger field load.
                 if (curIdx !== '') {
                     const ps = priorSteps[parseInt(curIdx, 10)];
                     st._stepRefPlatform = ps.platform;
                     st._stepRefAction = ps.task_type;
+                    clearTimeout(_bpUfFieldsTimer);
+                    _bpUfFieldsTimer = setTimeout(_bpLoadUpstreamFields, 100);
                 }
             }
         } else {

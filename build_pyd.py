@@ -236,10 +236,8 @@ from crawlhub.core.registry import discover_platforms, get_registry
 discover_platforms()
 plats = sorted(get_registry().keys())
 print(f'  -> platforms: {plats}')
-import platform as _pf
-_min_plats = 5 if _pf.system() == 'Darwin' else 6
-if len(plats) < _min_plats:
-    print(f'  FAIL: expected >={_min_plats} platforms, got {len(plats)}')
+if len(plats) < 6:
+    print(f'  FAIL: expected >=6 platforms, got {len(plats)}')
     sys.exit(2)
 """
         result = subprocess.run(
@@ -425,6 +423,27 @@ def step_compile_one_file(path_str: str) -> None:
 #  Main
 # ──────────────────────────────────────────────────────────────────────
 
+def step_version_check() -> None:
+    """Run scripts/check_version.py before building.
+    Exits with error if pyproject.toml version != git tag.
+    """
+    check_script = REPO_ROOT / "scripts" / "check_version.py"
+    if not check_script.exists():
+        print("[WARN] scripts/check_version.py not found, skipping version check")
+        return
+
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, str(check_script)],
+        cwd=str(REPO_ROOT),
+    )
+    if result.returncode != 0:
+        print("\n[FAIL] Version mismatch detected. Aborting build.")
+        print("[FIX]  Update pyproject.toml version to match the git tag,")
+        print("       or run with --skip-version-check to force.")
+        sys.exit(1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build compiled crawlhub wheel")
     parser.add_argument("--compile", action="store_true", help="only run Nuitka on the whole package")
@@ -433,6 +452,8 @@ def main() -> int:
     parser.add_argument("--only", metavar="PATH", help="compile a single .py file (relative to repo) and stop")
     parser.add_argument("--jobs", type=int, default=1, help="parallel compile jobs (default: 1)")
     parser.add_argument("--skip-verify", action="store_true", help="skip the post-compile import smoke-test")
+    parser.add_argument("--skip-version-check", action="store_true",
+                        help="skip the pyproject.toml vs git-tag version check")
     args = parser.parse_args()
 
     if args.clean:
@@ -441,6 +462,10 @@ def main() -> int:
     if args.only:
         step_compile_one_file(args.only)
         return 0
+
+    # Version consistency check (before any build steps)
+    if not args.skip_version_check:
+        step_version_check()
 
     print(f"Python: {sys.version.split()[0]} on {sys.platform}")
     print(f"Repo:   {REPO_ROOT}")

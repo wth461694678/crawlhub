@@ -318,14 +318,6 @@ from crawlhub.core.browser.host_environment import detect_host_environment
 _REAL_LOCALE = "zh-CN"
 _REAL_TIMEZONE_ID = "Asia/Shanghai"
 
-# ── User-Agent：动态读本机真实 Chrome 版本 ──
-# 反爬铁律：navigator.userAgent 声明的版本必须跟 navigator.userAgentData
-# 返回的 uaFullVersion 以及 TLS 握手的真实二进制版本一致，否则被秒杀。
-# 不能硬编码——Chrome 会自动更新，硬编码版本号会跟真机矛盾。
-# 所以在模块加载时调用 detect_host_environment() 获取真实 UA。
-_host_info = detect_host_environment()
-_REAL_USER_AGENT = _host_info.ua
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Accept-Language 头与 navigator.languages 一致性约束
 # ─────────────────────────────────────────────────────────────────────────────

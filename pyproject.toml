@@ -6,11 +6,16 @@ build-backend = "hatchling.build"
 name = "crawlhub"
 # Version is the single manual source of truth and must follow PEP 440.
 # CHANGELOG:
+#   1.1.2 (2026-06-10) — CI: compiled wheel build + platform matrix fix; Plan step fixes:
+#                         batch.py auto-normalizes legacy {run_id,field} to SQL pipeline,
+#                         frontend hydrates upstream_field tab correctly, saves concurrency/
+#                         allow_partial_upstream, safety-net _toggleBatchScheduleSection;
+#                         B站: pubdate_begin/pubdate_end params; init: simplified config check.
 #   1.1.1 (2026-06-08) — Fix: SKILL.md workflows, landing page polish, CI release fix.
 #   1.1.0 (2026-06-06) — Kuaishou: enter-room event, wealth_grade, giftType;
 #                         Bilibili: super_chat, guard_buy; Douyin: member/gift/social.
 #   1.0.0 (2026-05-xx) — Initial release.
-version = "1.1.1"
+version = "1.1.2"
 description = "Unified crawler platform - one daemon, all platforms"
 
 requires-python = ">=3.11"
@@ -33,6 +38,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "python-dateutil>=2.8",
     "pycryptodome>=3.19",
+    "curl-cffi>=0.7",
     "qrcode>=7.4",
     "psutil>=5.9",
 ]

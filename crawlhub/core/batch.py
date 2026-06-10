@@ -421,13 +421,28 @@ class BatchOrchestrator:
             raise ValueError("Action is required")
 
         # ------------------------------------------------------------------
-        # 1. Reject obsolete shapes early.
+        # 1. Reject / normalize obsolete shapes.
         # ------------------------------------------------------------------
         if items_from and "task_id" in items_from:
             raise ValueError(
                 "items_from {task_id, field} is no longer supported. "
                 "Use the SQL pipeline: items_from = {sources, sql, field, dedup?}."
             )
+
+        # ------------------------------------------------------------------
+        # 1.5. Normalize legacy flat {run_id, field?} into SQL pipeline shape.
+        #      The v1 frontend (upstream_field tab) wrote this shape before the
+        #      SQL pipeline was the only path. Convert it so the downstream
+        #      dependency check + waiting flow kicks in.
+        # ------------------------------------------------------------------
+        if items_from and "run_id" in items_from and "sources" not in items_from:
+            _run_id = items_from["run_id"]
+            _field = items_from.get("field", "item")
+            items_from = {
+                "sources": {"upstream": {"run_id": _run_id, "field": _field}},
+                "sql": f"SELECT {_field} FROM upstream",
+                "field": _field,
+            }
 
         # ------------------------------------------------------------------
         # 2. SQL validation (L0/L1/L2). Done BEFORE we touch the DB so a bad

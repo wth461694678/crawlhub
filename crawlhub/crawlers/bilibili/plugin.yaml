@@ -40,6 +40,14 @@ actions:
           default: "totalrank"
           enum: ["totalrank", "click", "pubdate", "dm", "stow"]
           enum_labels: ["综合排序（默认）", "最多播放", "最新发布", "最多弹幕", "最多收藏"]
+        pubdate_begin:
+          type: string
+          title: "发布日期起始"
+          description: "发布日期下界，格式为 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS（北京时间）。日期格式视为当天 00:00:00。必须与 pubdate_end 成对使用。"
+        pubdate_end:
+          type: string
+          title: "发布日期截止"
+          description: "发布日期上界，格式为 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS（北京时间）。日期格式视为当天 23:59:59。必须与 pubdate_begin 成对使用。"
       required: ["keyword"]
     output_schema:
       bvid:
